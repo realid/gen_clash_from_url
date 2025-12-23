@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="GenClashFromURL"
+APP_NAME="JMS订阅管家"
+EXE_NAME="JMSSubscriptionManager"
 ENTRYPOINT="gen_clash_from_url.py"
 PYTHON3="${PYTHON3:-}"
 PYTHON3_ARM="${PYTHON3_ARM:-}"
@@ -15,12 +16,132 @@ cd "$ROOT_DIR"
 
 DMG_BACKGROUND="${DMG_BACKGROUND:-$ROOT_DIR/assets/dmg-background.png}"
 
+ARM_DIST="dist_arm64"
+X86_DIST="dist_x86_64"
+UNI_DIST="dist_universal"
+ARM_BUILD="build_arm64"
+X86_BUILD="build_x86_64"
+STAGING_DIR=""
+DMG_RW=""
+MOUNT_DIR=""
+ICON_TMP_DIR=""
+
+cleanup() {
+  if [[ -n "$MOUNT_DIR" && -d "$MOUNT_DIR" ]]; then
+    hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$STAGING_DIR" && -d "$STAGING_DIR" ]]; then
+    rm -rf "$STAGING_DIR"
+  fi
+  if [[ -n "$DMG_RW" ]]; then
+    rm -f "$DMG_RW"
+  fi
+  if [[ -n "$ICON_TMP_DIR" && -d "$ICON_TMP_DIR" ]]; then
+    rm -rf "$ICON_TMP_DIR"
+  fi
+  rm -rf "$ARM_BUILD" "$X86_BUILD" "$ARM_DIST" "$X86_DIST"
+}
+trap cleanup EXIT
+
 DEFAULT_ICON="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns"
-PROJECT_ICON="$ROOT_DIR/assets/icon.icns"
-if [[ -f "$PROJECT_ICON" ]]; then
-  DEFAULT_ICON="$PROJECT_ICON"
+PROJECT_ICON_PNG="$ROOT_DIR/assets/icon.png"
+PROJECT_ICON_ICNS="$ROOT_DIR/assets/icon.icns"
+if [[ -f "$PROJECT_ICON_ICNS" ]]; then
+  DEFAULT_ICON="$PROJECT_ICON_ICNS"
 fi
 ICON_PATH="${ICON_PATH:-$DEFAULT_ICON}"
+
+if [[ -f "$PROJECT_ICON_PNG" ]] && command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+  ICON_TMP_DIR="$(mktemp -d)"
+  ICONSET_DIR="$ICON_TMP_DIR/icon.iconset"
+  mkdir -p "$ICONSET_DIR"
+  ICON_BASE_PNG="$PROJECT_ICON_PNG"
+  if command -v "$PYTHON3_ARM" >/dev/null 2>&1; then
+    "$PYTHON3_ARM" - "$PROJECT_ICON_PNG" "$ICON_TMP_DIR/icon_clean.png" <<'PY' || true
+from collections import deque
+from PIL import Image
+import sys
+
+src = sys.argv[1]
+dst = sys.argv[2]
+img = Image.open(src).convert("RGBA")
+w, h = img.size
+pix = img.load()
+visited = bytearray(w * h)
+q = deque()
+
+def is_bg(r, g, b, a):
+    return a > 0 and r >= 245 and g >= 245 and b >= 245
+
+for x in range(w):
+    for y in (0, h - 1):
+        r, g, b, a = pix[x, y]
+        if is_bg(r, g, b, a):
+            q.append((x, y))
+for y in range(h):
+    for x in (0, w - 1):
+        r, g, b, a = pix[x, y]
+        if is_bg(r, g, b, a):
+            q.append((x, y))
+
+while q:
+    x, y = q.popleft()
+    idx = y * w + x
+    if visited[idx]:
+        continue
+    visited[idx] = 1
+    r, g, b, a = pix[x, y]
+    if not is_bg(r, g, b, a):
+        continue
+    pix[x, y] = (r, g, b, 0)
+    if x > 0:
+        q.append((x - 1, y))
+    if x + 1 < w:
+        q.append((x + 1, y))
+    if y > 0:
+        q.append((x, y - 1))
+    if y + 1 < h:
+        q.append((x, y + 1))
+
+img.save(dst)
+PY
+    if [[ -f "$ICON_TMP_DIR/icon_clean.png" ]]; then
+      ICON_BASE_PNG="$ICON_TMP_DIR/icon_clean.png"
+    fi
+  fi
+  for size in 16 32 128 256 512; do
+    /usr/bin/sips -z "$size" "$size" "$ICON_BASE_PNG" --out "$ICONSET_DIR/icon_${size}x${size}.png" >/dev/null
+    /usr/bin/sips -z "$((size * 2))" "$((size * 2))" "$ICON_BASE_PNG" --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" >/dev/null
+  done
+  /usr/bin/iconutil -c icns "$ICONSET_DIR" -o "$ICON_TMP_DIR/icon.icns" >/dev/null 2>&1 || true
+  if [[ -f "$ICON_TMP_DIR/icon.icns" ]]; then
+    ICON_PATH="$ICON_TMP_DIR/icon.icns"
+  else
+    "$PYTHON3_ARM" - "$ICON_BASE_PNG" "$ICON_TMP_DIR/icon.icns" <<'PY' || true
+import struct
+import sys
+
+src = sys.argv[1]
+dst = sys.argv[2]
+with open(src, "rb") as f:
+    png_data = f.read()
+chunk_type = b"ic10"
+chunk_size = 8 + len(png_data)
+total_size = 8 + chunk_size
+data = bytearray()
+data.extend(b"icns")
+data.extend(struct.pack(">I", total_size))
+data.extend(chunk_type)
+data.extend(struct.pack(">I", chunk_size))
+data.extend(png_data)
+with open(dst, "wb") as f:
+    f.write(data)
+PY
+    if [[ -f "$ICON_TMP_DIR/icon.icns" ]]; then
+      ICON_PATH="$ICON_TMP_DIR/icon.icns"
+    fi
+  fi
+fi
 
 is_conda_python() {
   case "$1" in
@@ -161,20 +282,22 @@ verify_venv_yaml_arch arch -arm64 "$PYTHON3_ARM" "arm64"
 echo "Verifying PyYAML architecture in x86_64 Python..."
 verify_venv_yaml_arch arch -x86_64 "$PYTHON3_X86" "x86_64"
 
-ARM_DIST="dist_arm64"
-X86_DIST="dist_x86_64"
-UNI_DIST="dist_universal"
-ARM_BUILD="build_arm64"
-X86_BUILD="build_x86_64"
-
 mkdir -p "$ARM_DIST" "$X86_DIST" "$UNI_DIST"
 
 echo "Building arm64 app..."
 arch -arm64 "$PYTHON3_ARM" -m PyInstaller \
   --noconfirm \
   --windowed \
-  --name "$APP_NAME" \
+  --name "$EXE_NAME" \
   --icon "$ICON_PATH" \
+  --add-data "assets/tray:assets/tray" \
+  --hidden-import pystray \
+  --hidden-import pystray._darwin \
+  --hidden-import ttkbootstrap \
+  --hidden-import ttkbootstrap.constants \
+  --hidden-import PIL.Image \
+  --hidden-import PIL.ImageDraw \
+  --hidden-import PIL.ImageTk \
   --distpath "$ARM_DIST" \
   --workpath "$ARM_BUILD" \
   "$ENTRYPOINT"
@@ -183,14 +306,23 @@ echo "Building x86_64 app..."
 arch -x86_64 "$PYTHON3_X86" -m PyInstaller \
   --noconfirm \
   --windowed \
-  --name "$APP_NAME" \
+  --name "$EXE_NAME" \
   --icon "$ICON_PATH" \
+  --add-data "assets/tray:assets/tray" \
+  --hidden-import pystray \
+  --hidden-import pystray._darwin \
+  --hidden-import ttkbootstrap \
+  --hidden-import ttkbootstrap.constants \
+  --hidden-import PIL.Image \
+  --hidden-import PIL.ImageDraw \
+  --hidden-import PIL.ImageTk \
   --distpath "$X86_DIST" \
   --workpath "$X86_BUILD" \
   "$ENTRYPOINT"
 
-ARM_APP="$ARM_DIST/$APP_NAME.app"
-X86_APP="$X86_DIST/$APP_NAME.app"
+ARM_APP="$ARM_DIST/$EXE_NAME.app"
+X86_APP="$X86_DIST/$EXE_NAME.app"
+UNI_APP_TMP="$UNI_DIST/$EXE_NAME.app"
 UNI_APP="$UNI_DIST/$APP_NAME.app"
 DMG_PATH="$UNI_DIST/${DMG_NAME}.dmg"
 
@@ -199,8 +331,8 @@ if [[ ! -d "$ARM_APP" || ! -d "$X86_APP" ]]; then
   exit 1
 fi
 
-rm -rf "$UNI_APP"
-cp -R "$ARM_APP" "$UNI_APP"
+rm -rf "$UNI_APP_TMP" "$UNI_APP"
+cp -R "$ARM_APP" "$UNI_APP_TMP"
 
 is_macho() {
   file -b "$1" | grep -q "Mach-O"
@@ -237,7 +369,10 @@ while IFS= read -r -d '' f; do
       mv "$tmp" "$f"
     fi
   fi
-done < <(find "$UNI_APP" -type f -print0)
+done < <(find "$UNI_APP_TMP" -type f -print0)
+
+rm -rf "$UNI_APP"
+mv "$UNI_APP_TMP" "$UNI_APP"
 
 if [[ "$BUILD_DMG" == "1" ]]; then
   echo "Packaging DMG..."
@@ -249,13 +384,27 @@ if [[ "$BUILD_DMG" == "1" ]]; then
   if [[ -f "$DMG_BACKGROUND" ]]; then
     cp "$DMG_BACKGROUND" "$STAGING_DIR/.background/background.png"
   fi
+  if [[ -f "$ICON_PATH" ]]; then
+    cp "$ICON_PATH" "$STAGING_DIR/.VolumeIcon.icns"
+  fi
 
   DMG_RW="$UNI_DIST/${DMG_NAME}-rw.dmg"
   rm -f "$DMG_RW"
-  hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING_DIR" -ov -format UDRW "$DMG_RW" >/dev/null
+  if ! hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING_DIR" -ov -format UDRW "$DMG_RW" >/dev/null; then
+    echo "Warning: DMG create failed; skipping DMG packaging."
+    echo "Done: $UNI_APP"
+    exit 0
+  fi
 
   MOUNT_DIR="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW" | tail -n 1 | awk '{print $3}')"
   if [[ -n "$MOUNT_DIR" && -d "$MOUNT_DIR" ]]; then
+    if [[ -f "$ICON_PATH" ]]; then
+      cp "$ICON_PATH" "$MOUNT_DIR/.VolumeIcon.icns"
+      if [[ -x "/usr/bin/SetFile" ]]; then
+        /usr/bin/SetFile -a C "$MOUNT_DIR" >/dev/null 2>&1 || true
+        /usr/bin/SetFile -a V "$MOUNT_DIR/.VolumeIcon.icns" >/dev/null 2>&1 || true
+      fi
+    fi
     if [[ -f "$DMG_BACKGROUND" ]]; then
       if ! /usr/bin/osascript <<EOF
 tell application "Finder"
@@ -290,7 +439,6 @@ EOF
   else
     rm -f "$DMG_RW"
   fi
-  rm -rf "$STAGING_DIR"
   echo "DMG created: $DMG_PATH"
 fi
 

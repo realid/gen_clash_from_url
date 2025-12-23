@@ -1,0 +1,11 @@
+.venv_arm64/
+.venv_x86/
+build_arm64/
+build_x86_64/
+dist_arm64/
+dist_x86_64/
+dist_universal/
+__pycache__/
+*.pyc
+*.spec
+.DS_Store
