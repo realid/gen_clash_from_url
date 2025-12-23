@@ -7,10 +7,20 @@ PYTHON3="${PYTHON3:-}"
 PYTHON3_ARM="${PYTHON3_ARM:-}"
 PYTHON3_X86="${PYTHON3_X86:-}"
 MIN_TK_VERSION="${MIN_TK_VERSION:-8.6}"
-ICON_PATH="${ICON_PATH:-/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns}"
+BUILD_DMG="${BUILD_DMG:-1}"
+DMG_NAME="${DMG_NAME:-${APP_NAME}}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+
+DMG_BACKGROUND="${DMG_BACKGROUND:-$ROOT_DIR/assets/dmg-background.png}"
+
+DEFAULT_ICON="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns"
+PROJECT_ICON="$ROOT_DIR/assets/icon.icns"
+if [[ -f "$PROJECT_ICON" ]]; then
+  DEFAULT_ICON="$PROJECT_ICON"
+fi
+ICON_PATH="${ICON_PATH:-$DEFAULT_ICON}"
 
 is_conda_python() {
   case "$1" in
@@ -182,6 +192,7 @@ arch -x86_64 "$PYTHON3_X86" -m PyInstaller \
 ARM_APP="$ARM_DIST/$APP_NAME.app"
 X86_APP="$X86_DIST/$APP_NAME.app"
 UNI_APP="$UNI_DIST/$APP_NAME.app"
+DMG_PATH="$UNI_DIST/${DMG_NAME}.dmg"
 
 if [[ ! -d "$ARM_APP" || ! -d "$X86_APP" ]]; then
   echo "Build failed: app bundle not found."
@@ -227,5 +238,60 @@ while IFS= read -r -d '' f; do
     fi
   fi
 done < <(find "$UNI_APP" -type f -print0)
+
+if [[ "$BUILD_DMG" == "1" ]]; then
+  echo "Packaging DMG..."
+  rm -f "$DMG_PATH"
+  STAGING_DIR="$(mktemp -d)"
+  mkdir -p "$STAGING_DIR/.background"
+  cp -R "$UNI_APP" "$STAGING_DIR/"
+  ln -s /Applications "$STAGING_DIR/Applications"
+  if [[ -f "$DMG_BACKGROUND" ]]; then
+    cp "$DMG_BACKGROUND" "$STAGING_DIR/.background/background.png"
+  fi
+
+  DMG_RW="$UNI_DIST/${DMG_NAME}-rw.dmg"
+  rm -f "$DMG_RW"
+  hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING_DIR" -ov -format UDRW "$DMG_RW" >/dev/null
+
+  MOUNT_DIR="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW" | tail -n 1 | awk '{print $3}')"
+  if [[ -n "$MOUNT_DIR" && -d "$MOUNT_DIR" ]]; then
+    if [[ -f "$DMG_BACKGROUND" ]]; then
+      if ! /usr/bin/osascript <<EOF
+tell application "Finder"
+  tell disk "$APP_NAME"
+    open
+    set theContainer to container window
+    set current view of theContainer to icon view
+    set toolbar visible of theContainer to false
+    set statusbar visible of theContainer to false
+    set the bounds of theContainer to {100, 100, 900, 600}
+    set theViewOptions to icon view options of theContainer
+    set arrangement of theViewOptions to not arranged
+    set icon size of theViewOptions to 96
+    set background picture of theViewOptions to file ".background:background.png"
+    set position of item "$APP_NAME.app" of theContainer to {200, 260}
+    set position of item "Applications" of theContainer to {700, 260}
+    close
+    open
+    update without registering applications
+  end tell
+end tell
+EOF
+      then
+        echo "Warning: DMG styling failed; continuing with default layout."
+      fi
+    fi
+    hdiutil detach "$MOUNT_DIR" >/dev/null
+  fi
+
+  if ! hdiutil convert "$DMG_RW" -format UDZO -o "$DMG_PATH" >/dev/null; then
+    echo "Warning: DMG convert failed; keeping read-write image at $DMG_RW"
+  else
+    rm -f "$DMG_RW"
+  fi
+  rm -rf "$STAGING_DIR"
+  echo "DMG created: $DMG_PATH"
+fi
 
 echo "Done: $UNI_APP"

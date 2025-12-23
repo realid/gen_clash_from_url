@@ -15,7 +15,7 @@ from urllib.parse import unquote
 
 import requests
 import yaml
-from tkinter import Tk, StringVar, Text, Label, ttk
+from tkinter import Tk, StringVar, Text, Label, ttk, Toplevel, Listbox, END
 from tkinter import filedialog
 
 
@@ -275,7 +275,22 @@ def run_gui(default_output: str) -> int:
     root.title("Generate Clash YAML")
     root.resizable(False, False)
 
-    url_var = StringVar()
+    def load_last_url() -> str:
+        try:
+            path = Path.home() / ".config" / "gen_clash_from_url" / "last_url.txt"
+            return path.read_text(encoding="utf-8").strip()
+        except Exception:
+            return ""
+
+    def save_last_url(url: str) -> None:
+        try:
+            path = Path.home() / ".config" / "gen_clash_from_url" / "last_url.txt"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(url.strip(), encoding="utf-8")
+        except Exception:
+            pass
+
+    url_var = StringVar(value=load_last_url())
     path_var = StringVar(
         value=str(Path(default_output).expanduser().resolve()))
     status_var = StringVar(value="Ready.")
@@ -328,6 +343,7 @@ def run_gui(default_output: str) -> int:
             return
         latest_yaml["text"] = yaml_text
         set_output(yaml_text)
+        save_last_url(url)
         set_status(f"Generated YAML (nodes={nodes})", "success")
 
     def save_yaml() -> None:
@@ -348,12 +364,125 @@ def run_gui(default_output: str) -> int:
             return
         set_status(f"Wrote {path}", "success")
 
+    def find_clash_config_dir() -> Path:
+        return Path.home() / ".config" / "clash"
+
+    def find_icloud_clash_config_dir() -> Optional[Path]:
+        icloud_root = Path.home() / "Library" / "Mobile Documents"
+        if not icloud_root.is_dir():
+            return None
+        preferred = [
+            "iCloud~com~sungkh~ClashX",
+            "iCloud~com~sungkh~ClashXPro",
+            "iCloud~com~west2online~ClashX",
+        ]
+        matches: List[Path] = []
+        for name in preferred:
+            p = icloud_root / name / "Documents"
+            if p.is_dir():
+                matches.append(p)
+        for p in icloud_root.iterdir():
+            if not p.is_dir():
+                continue
+            if "ClashX" not in p.name:
+                continue
+            docs = p / "Documents"
+            if docs.is_dir():
+                if docs not in matches:
+                    matches.append(docs)
+        if not matches:
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        return choose_icloud_dir(matches)
+
+    def choose_icloud_dir(matches: List[Path]) -> Optional[Path]:
+        result: Dict[str, Optional[Path]] = {"path": None}
+        dialog = Toplevel(root)
+        dialog.title("Select iCloud ClashX folder")
+        dialog.resizable(False, False)
+
+        listbox = Listbox(dialog, width=80, height=min(6, len(matches)))
+        for p in matches:
+            listbox.insert(END, str(p))
+        listbox.selection_set(0)
+        listbox.grid(row=0, column=0, columnspan=2,
+                     padx=12, pady=12, sticky="we")
+
+        def on_ok() -> None:
+            sel = listbox.curselection()
+            if sel:
+                result["path"] = matches[sel[0]]
+            dialog.destroy()
+
+        def on_cancel() -> None:
+            dialog.destroy()
+
+        ttk.Button(dialog, text="OK", command=on_ok).grid(
+            row=1, column=0, padx=(12, 6), pady=(0, 12), sticky="we")
+        ttk.Button(dialog, text="Cancel", command=on_cancel).grid(
+            row=1, column=1, padx=(6, 12), pady=(0, 12), sticky="we")
+
+        dialog.transient(root)
+        dialog.grab_set()
+        root.wait_window(dialog)
+        return result["path"]
+        return None
+
+    def save_yaml_to_clashx() -> None:
+        if not latest_yaml["text"]:
+            set_status("Error: Please generate YAML first.", "error")
+            return
+        target_dir = find_clash_config_dir()
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            name = f"{date.today().strftime('%Y-%m-%d')}.yaml"
+            out = target_dir / name
+            with out.open("w", encoding="utf-8") as f:
+                f.write(latest_yaml["text"])
+        except Exception as e:
+            set_status(f"Error: Save failed: {e}", "error")
+            return
+        path_var.set(str(out))
+        set_status(f"Wrote {out}", "success")
+
+    def save_yaml_to_icloud() -> None:
+        if not latest_yaml["text"]:
+            set_status("Error: Please generate YAML first.", "error")
+            return
+        target_dir = find_icloud_clash_config_dir()
+        if not target_dir:
+            set_status("Error: iCloud ClashX folder not found.", "error")
+            return
+        try:
+            name = f"{date.today().strftime('%Y-%m-%d')}.yaml"
+            out = target_dir / name
+            with out.open("w", encoding="utf-8") as f:
+                f.write(latest_yaml["text"])
+        except Exception as e:
+            set_status(f"Error: Save failed: {e}", "error")
+            return
+        path_var.set(str(out))
+        set_status(f"Wrote {out}", "success")
+
     frm = ttk.Frame(root, padding=12)
     frm.grid()
 
     ttk.Label(frm, text="Subscription URL").grid(row=0, column=0, sticky="w")
     url_entry = ttk.Entry(frm, width=60, textvariable=url_var)
     url_entry.grid(row=1, column=0, columnspan=2, sticky="we", pady=(4, 10))
+
+    def persist_url(_e: object = None) -> None:
+        save_last_url(url_var.get())
+
+    url_entry.bind("<FocusOut>", persist_url)
+    url_entry.bind("<KeyRelease>", persist_url)
+
+    def on_close() -> None:
+        persist_url()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
     ttk.Label(frm, text="Output YAML Path").grid(row=2, column=0, sticky="w")
     path_entry = ttk.Entry(frm, width=50, textvariable=path_var)
@@ -365,15 +494,29 @@ def run_gui(default_output: str) -> int:
         row=4, column=0, sticky="we")
     ttk.Button(frm, text="Save YAML", command=save_yaml).grid(
         row=4, column=1, sticky="we", padx=(8, 0))
+    ttk.Button(frm, text="Save to Clash Config", command=save_yaml_to_clashx).grid(
+        row=5, column=0, columnspan=2, sticky="we", pady=(6, 0))
+    ttk.Button(frm, text="Save to iCloud ClashX", command=save_yaml_to_icloud).grid(
+        row=6, column=0, columnspan=2, sticky="we", pady=(6, 0))
 
     status_label = Label(frm, textvariable=status_var, anchor="w")
-    status_label.grid(row=5, column=0, columnspan=2, sticky="we", pady=(10, 0))
+    status_label.grid(row=7, column=0, columnspan=2, sticky="we", pady=(10, 0))
 
     ttk.Label(frm, text="YAML Output").grid(
-        row=6, column=0, sticky="w", pady=(8, 0))
+        row=8, column=0, sticky="w", pady=(8, 0))
     output_text = Text(frm, width=70, height=18, wrap="none")
-    output_text.grid(row=7, column=0, columnspan=2, sticky="we", pady=(4, 0))
+    output_text.grid(row=9, column=0, columnspan=2, sticky="we", pady=(4, 0))
     output_text.configure(state="disabled")
+
+    copyright_label = Label(
+        frm,
+        text="© 李丹 2025 · Powered by ChatGPT",
+        anchor="e",
+        foreground="#888888",
+        font=("Helvetica", 10),
+    )
+    copyright_label.grid(row=10, column=0, columnspan=2,
+                         sticky="we", pady=(8, 0))
 
     url_entry.focus_set()
     root.mainloop()
