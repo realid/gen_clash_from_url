@@ -15,7 +15,18 @@ from urllib.parse import unquote
 
 import requests
 import yaml
-from tkinter import Tk, StringVar, Text, Label, ttk, Toplevel, Listbox, END
+from tkinter import (
+    Tk,
+    StringVar,
+    Text,
+    Label,
+    Canvas,
+    ttk,
+    Toplevel,
+    Listbox,
+    END,
+    messagebox,
+)
 from tkinter import filedialog
 
 
@@ -465,10 +476,55 @@ def run_gui(default_output: str) -> int:
         path_var.set(str(out))
         set_status(f"Wrote {out}", "success")
 
+    def show_help() -> None:
+        message = (
+            "使用说明：\n"
+            "1) 输入 JMS 订阅 URL。\n"
+            "2) 点击 Generate 生成 YAML。\n"
+            "3) 可选择保存路径，或直接保存到 ClashX 配置目录。\n"
+            "提示：iCloud 目录会自动识别 ClashX 文件夹。\n"
+        )
+        messagebox.showinfo("帮助", message, parent=root)
+
     frm = ttk.Frame(root, padding=12)
     frm.grid()
 
-    ttk.Label(frm, text="Subscription URL").grid(row=0, column=0, sticky="w")
+    label_row = ttk.Frame(frm)
+    label_row.grid(row=0, column=0, columnspan=2, sticky="we")
+    label_row.columnconfigure(0, weight=1)
+    ttk.Label(label_row, text="Subscription URL").grid(
+        row=0, column=0, sticky="w")
+
+    style = ttk.Style()
+    bg = style.lookup("TFrame", "background") or root.cget("background")
+    help_canvas = Canvas(
+        label_row,
+        width=20,
+        height=20,
+        highlightthickness=0,
+        background=bg,
+        cursor="hand2",
+    )
+    help_circle = help_canvas.create_oval(
+        2, 2, 18, 18, fill="#f2f2f2", outline="#999999")
+    help_text = help_canvas.create_text(
+        10, 10, text="?", fill="#333333", font=("Helvetica", 10, "bold"))
+    help_canvas.grid(row=0, column=1, sticky="e")
+
+    def on_help_enter(_e: object = None) -> None:
+        help_canvas.itemconfigure(
+            help_circle, fill="#e8f0fe", outline="#1a73e8")
+        help_canvas.itemconfigure(help_text, fill="#1a73e8")
+
+    def on_help_leave(_e: object = None) -> None:
+        help_canvas.itemconfigure(
+            help_circle, fill="#f2f2f2", outline="#999999")
+        help_canvas.itemconfigure(help_text, fill="#333333")
+
+    help_canvas.bind("<Button-1>", lambda _e: show_help())
+    help_canvas.bind("<Enter>", on_help_enter)
+    help_canvas.bind("<Leave>", on_help_leave)
+
     url_entry = ttk.Entry(frm, width=60, textvariable=url_var)
     url_entry.grid(row=1, column=0, columnspan=2, sticky="we", pady=(4, 10))
 
