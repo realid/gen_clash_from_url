@@ -224,16 +224,9 @@ def build_clash_config(nodes: List[Node], port: int, allow_lan: bool) -> Dict[st
         "proxies": proxies,
         "proxy-groups": [
             {
-                "name": "AUTO",
-                "type": "url-test",
-                "proxies": names,
-                "url": "https://cp.cloudflare.com/generate_204",
-                "interval": 300,
-            },
-            {
                 "name": "MANUAL",
                 "type": "select",
-                "proxies": ["AUTO", "DIRECT"] + names,
+                "proxies": names,
             },
         ],
         "rules": [
@@ -265,7 +258,7 @@ def generate_from_url(url: str) -> tuple[int, Dict[str, Any], str]:
     if not nodes:
         raise InternalError("解析结果为空：订阅可能不是 base64 列表，或不包含 ss/vmess。")
 
-    cfg = build_clash_config(nodes, default_port, False)
+    cfg = build_clash_config(nodes, default_port, True)
     yaml_text = yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False)
     return len(nodes), cfg, yaml_text
 
@@ -334,10 +327,11 @@ def run_gui(default_output: str) -> int:
             path_var.set(chosen)
 
     def set_output(text: str) -> None:
-        output_text.configure(state="normal")
         output_text.delete("1.0", "end")
         output_text.insert("1.0", text)
-        output_text.configure(state="disabled")
+
+    def current_yaml_text() -> str:
+        return output_text.get("1.0", "end-1c")
 
     def generate() -> None:
         url = url_var.get().strip()
@@ -362,17 +356,19 @@ def run_gui(default_output: str) -> int:
         if not path:
             set_status("Error: Please choose output path.", "error")
             return
-        if not latest_yaml["text"]:
+        yaml_text = current_yaml_text()
+        if not yaml_text.strip():
             set_status("Error: Please generate YAML first.", "error")
             return
         try:
             out = Path(path).expanduser().resolve()
             out.parent.mkdir(parents=True, exist_ok=True)
             with out.open("w", encoding="utf-8") as f:
-                f.write(latest_yaml["text"])
+                f.write(yaml_text)
         except Exception as e:
             set_status(f"Error: Save failed: {e}", "error")
             return
+        latest_yaml["text"] = yaml_text
         set_status(f"Wrote {path}", "success")
 
     def find_clash_config_dir() -> Path:
@@ -441,7 +437,8 @@ def run_gui(default_output: str) -> int:
         return None
 
     def save_yaml_to_clashx() -> None:
-        if not latest_yaml["text"]:
+        yaml_text = current_yaml_text()
+        if not yaml_text.strip():
             set_status("Error: Please generate YAML first.", "error")
             return
         target_dir = find_clash_config_dir()
@@ -450,15 +447,17 @@ def run_gui(default_output: str) -> int:
             name = f"{date.today().strftime('%Y-%m-%d')}.yaml"
             out = target_dir / name
             with out.open("w", encoding="utf-8") as f:
-                f.write(latest_yaml["text"])
+                f.write(yaml_text)
         except Exception as e:
             set_status(f"Error: Save failed: {e}", "error")
             return
+        latest_yaml["text"] = yaml_text
         path_var.set(str(out))
         set_status(f"Wrote {out}", "success")
 
     def save_yaml_to_icloud() -> None:
-        if not latest_yaml["text"]:
+        yaml_text = current_yaml_text()
+        if not yaml_text.strip():
             set_status("Error: Please generate YAML first.", "error")
             return
         target_dir = find_icloud_clash_config_dir()
@@ -469,10 +468,11 @@ def run_gui(default_output: str) -> int:
             name = f"{date.today().strftime('%Y-%m-%d')}.yaml"
             out = target_dir / name
             with out.open("w", encoding="utf-8") as f:
-                f.write(latest_yaml["text"])
+                f.write(yaml_text)
         except Exception as e:
             set_status(f"Error: Save failed: {e}", "error")
             return
+        latest_yaml["text"] = yaml_text
         path_var.set(str(out))
         set_status(f"Wrote {out}", "success")
 
@@ -550,7 +550,7 @@ def run_gui(default_output: str) -> int:
         row=4, column=0, sticky="we")
     ttk.Button(frm, text="Save YAML", command=save_yaml).grid(
         row=4, column=1, sticky="we", padx=(8, 0))
-    ttk.Button(frm, text="Save to Clash Config", command=save_yaml_to_clashx).grid(
+    ttk.Button(frm, text="Save to ClashX Config", command=save_yaml_to_clashx).grid(
         row=5, column=0, columnspan=2, sticky="we", pady=(6, 0))
     ttk.Button(frm, text="Save to iCloud ClashX", command=save_yaml_to_icloud).grid(
         row=6, column=0, columnspan=2, sticky="we", pady=(6, 0))
@@ -562,7 +562,6 @@ def run_gui(default_output: str) -> int:
         row=8, column=0, sticky="w", pady=(8, 0))
     output_text = Text(frm, width=70, height=18, wrap="none")
     output_text.grid(row=9, column=0, columnspan=2, sticky="we", pady=(4, 0))
-    output_text.configure(state="disabled")
 
     copyright_label = Label(
         frm,
