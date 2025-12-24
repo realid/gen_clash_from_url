@@ -20,6 +20,7 @@ from tkinter import (
     Entry,
     Frame,
     Label,
+    Toplevel,
     messagebox,
 )
 from tkinter import filedialog, font as tkfont
@@ -35,7 +36,7 @@ except Exception:
     TTKBOOTSTRAP = False
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageTk
+    from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk
     PIL_AVAILABLE = True
 except Exception:
     PIL_AVAILABLE = False
@@ -58,10 +59,8 @@ def run_gui(default_output: str) -> int:
         root = tb.Window(themename="yeti")
     else:
         root = Tk()
-    root.title("JMS 订阅管家")
-    root.resizable(True, True)
-    root.geometry("900x720")
-    root.minsize(600, 450)
+    root.title(" ")
+    root.resizable(False, False)
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
 
@@ -70,6 +69,7 @@ def run_gui(default_output: str) -> int:
         base_font = tkfont.Font(family="PingFang SC", size=12)
     small_font = tkfont.Font(family=base_font.actual("family"), size=11)
     title_font = tkfont.Font(family=base_font.actual("family"), size=12, weight="bold")
+    logo_font = tkfont.Font(family=base_font.actual("family"), size=13, weight="bold")
 
     style = ttk.Style()
     if TTKBOOTSTRAP:
@@ -80,17 +80,17 @@ def run_gui(default_output: str) -> int:
     mac_bg = "#f2f2f7"
     mac_border = "#c7c7cc"
     mac_text = "#1c1c1e"
+    mac_label = "#6e6e73"
     mac_field_bg = "#ffffff"
+
     mac_button_bg = "#efeff4"
     mac_button_hover = "#e5e5ea"
     mac_button_active = "#dcdce0"
     style.configure("TLabel", font=base_font, background=mac_bg)
-    style.configure("TButton", font=base_font, padding=(8, 2))
+    style.configure("TButton", font=base_font, padding=(6, 2))
     style.configure("TEntry", font=base_font, padding=(6, 2))
     style.configure("TLabelframe", background=mac_bg)
     style.configure("TLabelframe.Label", font=title_font, background=mac_bg)
-    style.configure("TNotebook", background=mac_bg)
-    style.configure("TNotebook.Tab", font=small_font, padding=(8, 4))
     if TTKBOOTSTRAP:
         style.configure(
             "Mac.TButton",
@@ -107,13 +107,14 @@ def run_gui(default_output: str) -> int:
         )
 
     icon_cache: Dict[str, object] = {}
+    label_icons: List[object] = []
 
-    def make_icon(kind: str, size: int = 14) -> Optional[object]:
+    def make_icon(kind: str, size: int = 16, color: str = "#3a3a3c") -> Optional[object]:
         if not PIL_AVAILABLE:
             return None
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        stroke = max(1, size // 9)
+        stroke = max(1, size // 8)
         inset = stroke + 2
 
         if kind == "generate":
@@ -125,59 +126,110 @@ def run_gui(default_output: str) -> int:
                 (size * 0.75, size * 0.42),
                 (size * 0.5, size * 0.42),
             ]
-            d.line(pts, fill="black", width=stroke, joint="curve")
+            d.line(pts, fill=color, width=stroke, joint="curve")
         elif kind == "save":
-            d.rectangle((inset, inset, size - inset, size - inset), outline="black", width=stroke)
+            d.rectangle((inset, inset, size - inset, size - inset), outline=color, width=stroke)
             d.rectangle((inset + 2, inset + 2, size - inset - 2, size * 0.45),
-                        outline="black", width=stroke)
+                        outline=color, width=stroke)
         elif kind == "download":
             d.rectangle((inset, size * 0.6, size - inset, size - inset),
-                        outline="black", width=stroke)
+                        outline=color, width=stroke)
             d.line((size * 0.5, inset, size * 0.5, size * 0.6),
-                   fill="black", width=stroke)
+                   fill=color, width=stroke)
             d.polygon([(size * 0.35, size * 0.45),
                        (size * 0.65, size * 0.45),
                        (size * 0.5, size * 0.62)],
-                      outline="black", fill="black")
+                      outline=color, fill=color)
         elif kind == "cloud":
             d.ellipse((size * 0.15, size * 0.4, size * 0.45, size * 0.7),
-                      outline="black", width=stroke)
+                      outline=color, width=stroke)
             d.ellipse((size * 0.35, size * 0.28, size * 0.7, size * 0.72),
-                      outline="black", width=stroke)
+                      outline=color, width=stroke)
             d.ellipse((size * 0.6, size * 0.45, size * 0.85, size * 0.7),
-                      outline="black", width=stroke)
+                      outline=color, width=stroke)
             d.line((size * 0.2, size * 0.7, size * 0.8, size * 0.7),
-                   fill="black", width=stroke)
+                   fill=color, width=stroke)
         elif kind == "play":
             d.polygon([(inset, inset), (size - inset, size * 0.5), (inset, size - inset)],
-                      outline="black", fill="black")
+                      outline=color, fill=color)
         elif kind == "stop":
             d.rectangle((inset + 2, inset + 2, size - inset - 2, size - inset - 2),
-                        outline="black", width=stroke)
+                        outline=color, width=stroke)
         elif kind == "copy":
             d.rectangle((inset + 3, inset + 2, size - inset, size - inset - 3),
-                        outline="black", width=stroke)
+                        outline=color, width=stroke)
             d.rectangle((inset, inset + 5, size - inset - 3, size - inset),
-                        outline="black", width=stroke)
+                        outline=color, width=stroke)
         elif kind == "trash":
             d.rectangle((inset + 2, inset + 5, size - inset - 2, size - inset),
-                        outline="black", width=stroke)
+                        outline=color, width=stroke)
             d.line((inset + 2, inset + 4, size - inset - 2, inset + 4),
-                   fill="black", width=stroke)
+                   fill=color, width=stroke)
         elif kind == "format":
             d.line((size * 0.35, inset + 2, inset + 2, size * 0.5),
-                   fill="black", width=stroke)
+                   fill=color, width=stroke)
             d.line((inset + 2, size * 0.5, size * 0.35, size - inset - 2),
-                   fill="black", width=stroke)
+                   fill=color, width=stroke)
             d.line((size * 0.65, inset + 2, size - inset - 2, size * 0.5),
-                   fill="black", width=stroke)
+                   fill=color, width=stroke)
             d.line((size - inset - 2, size * 0.5, size * 0.65, size - inset - 2),
-                   fill="black", width=stroke)
+                   fill=color, width=stroke)
+        elif kind == "link":
+            d.ellipse((inset, size * 0.35, size * 0.5, size * 0.85),
+                      outline=color, width=stroke)
+            d.ellipse((size * 0.5, size * 0.15, size - inset, size * 0.65),
+                      outline=color, width=stroke)
+            d.line((size * 0.35, size * 0.6, size * 0.65, size * 0.4),
+                   fill=color, width=stroke)
+        elif kind == "folder":
+            d.rectangle((inset, size * 0.35, size - inset, size - inset),
+                        outline=color, width=stroke)
+            d.rectangle((inset, inset, size * 0.55, size * 0.45),
+                        outline=color, width=stroke)
+        elif kind == "server":
+            d.rectangle((inset, inset, size - inset, size * 0.5),
+                        outline=color, width=stroke)
+            d.rectangle((inset, size * 0.55, size - inset, size - inset),
+                        outline=color, width=stroke)
+            d.ellipse((size * 0.75, size * 0.12, size * 0.85, size * 0.22),
+                      outline=color, width=stroke)
+            d.ellipse((size * 0.75, size * 0.67, size * 0.85, size * 0.77),
+                      outline=color, width=stroke)
+        elif kind == "port":
+            d.ellipse((inset, inset, size - inset, size - inset),
+                      outline=color, width=stroke)
+            d.ellipse((size * 0.45, size * 0.45, size * 0.55, size * 0.55),
+                      outline=color, width=stroke)
+        elif kind == "timer":
+            d.ellipse((inset, inset, size - inset, size - inset),
+                      outline=color, width=stroke)
+            d.line((size * 0.5, size * 0.5, size * 0.5, size * 0.25),
+                   fill=color, width=stroke)
+            d.line((size * 0.5, size * 0.5, size * 0.7, size * 0.55),
+                   fill=color, width=stroke)
         else:
             d.rectangle((inset, inset, size - inset, size - inset),
-                        outline="black", width=stroke)
+                        outline=color, width=stroke)
 
         return ImageTk.PhotoImage(img)
+
+    def make_label_with_icon(parent: object, text: str, kind: str, font: object,
+                             size: int = 16, color: str = "#3a3a3c") -> Label:
+        icon = make_icon(kind, size=size, color=color)
+        if icon is not None:
+            label_icons.append(icon)
+            label = Label(
+                parent,
+                text=text,
+                image=icon,
+                compound="left",
+                padx=4,
+                bg=mac_bg,
+                fg=mac_text,
+                font=font,
+            )
+            return label
+        return Label(parent, text=text, bg=mac_bg, fg=mac_text, font=font)
 
     def _rounded_rect(canvas: Canvas, x1: int, y1: int, x2: int, y2: int, r: int, **kwargs: object) -> int:
         points = [
@@ -196,6 +248,86 @@ def run_gui(default_output: str) -> int:
         ]
         return canvas.create_polygon(points, smooth=True, **kwargs)
 
+
+    class RoundedEntry(Frame):
+        def __init__(self, parent: object, textvariable: StringVar, readonly: bool = False):
+            super().__init__(parent, bg=mac_bg)
+            Frame.configure(self, height=28)
+            self.configure(height=28)
+            self.grid_propagate(False)
+            self.pack_propagate(False)
+            self._focused = False
+            self._pad = 2
+            self._radius = 7
+            self._canvas = Canvas(self, highlightthickness=0, bg=mac_bg)
+            self._canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self.entry = Entry(
+                self,
+                textvariable=textvariable,
+                bd=0,
+                relief="flat",
+                highlightthickness=0,
+                fg=mac_text,
+                bg=mac_field_bg,
+                insertbackground=mac_text,
+                disabledforeground=mac_text,
+                font=base_font,
+            )
+            if readonly:
+                self.entry.configure(state="readonly", readonlybackground=mac_field_bg)
+            self.entry.place(x=self._pad, y=self._pad, relwidth=1, relheight=1,
+                             width=-self._pad * 2, height=-self._pad * 2)
+            self._canvas.bind("<Configure>", self._redraw)
+            self.entry.bind("<FocusIn>", self._on_focus_in)
+            self.entry.bind("<FocusOut>", self._on_focus_out)
+
+        def _on_focus_in(self, _e: object = None) -> None:
+            self._focused = True
+            self._redraw()
+
+        def _on_focus_out(self, _e: object = None) -> None:
+            self._focused = False
+            self._redraw()
+
+        def _redraw(self, _e: object = None) -> None:
+            w = self._canvas.winfo_width()
+            h = self._canvas.winfo_height()
+            if w <= 1 or h <= 1:
+                return
+            self._canvas.delete("all")
+            outline = "#0a84ff" if self._focused else mac_border
+            _rounded_rect(
+                self._canvas,
+                1,
+                1,
+                w - 1,
+                h - 1,
+                self._radius,
+                fill=mac_field_bg,
+                outline=outline,
+                width=1,
+            )
+
+        def bind(self, sequence: Optional[str] = None, func: Optional[object] = None, add: Optional[bool] = None):
+            return self.entry.bind(sequence, func, add)
+
+        def focus_set(self) -> None:
+            self.entry.focus_set()
+
+        def get(self) -> str:
+            return self.entry.get()
+
+        def insert(self, index: int, string: str) -> None:
+            self.entry.insert(index, string)
+
+        def delete(self, first: int, last: Optional[int] = None) -> None:
+            self.entry.delete(first, last)
+
+        def configure(self, **kwargs: object) -> None:
+            if "height" in kwargs:
+                Frame.configure(self, height=kwargs.pop("height"))
+            if kwargs:
+                self.entry.configure(**kwargs)
 
     class MacButton(Canvas):
         def __init__(self, parent: object, text: str, command: object, icon: Optional[object] = None):
@@ -232,7 +364,7 @@ def run_gui(default_output: str) -> int:
             icon_w = 14 if self._icon else 0
             gap = 6 if self._icon else 0
             total_w = text_w + icon_w + gap
-            start_x = max(8, (w - total_w) // 2)
+            start_x = max(6, (w - total_w) // 2)
             x = start_x
             if self._icon:
                 self.create_image(x, h // 2, image=self._icon, anchor="w")
@@ -291,7 +423,7 @@ def run_gui(default_output: str) -> int:
                 return
             on = bool(self._var.get())
             track = "#0a84ff" if on else "#e5e5ea"
-            _rounded_rect(self, 1, 1, w - 1, h - 1, r=h // 2, fill=track, outline=mac_border, width=1)
+            _rounded_rect(self, 1, 1, w - 1, h - 1, r=(h - 2) // 2, fill=track, outline=mac_border, width=1)
             knob_r = h - 4
             x = w - knob_r - 2 if on else 2
             self.create_oval(x, 2, x + knob_r, 2 + knob_r, fill="#ffffff", outline="#d1d1d6")
@@ -601,56 +733,144 @@ def run_gui(default_output: str) -> int:
         message = (
             "使用说明：\n"
             "1) 输入 JMS 订阅 URL。\n"
-            "2) 点击 生成 生成 YAML。\n"
-            "3) 可选择保存路径并点击 保存。\n"
+            "2) 点击 生成 获取 YAML。\n"
+            "3) 选择保存路径后点击 保存。\n"
+            "4) 本地订阅服务可一键启动，双击地址可复制。\n"
         )
-        messagebox.showinfo("帮助", message, parent=root)
+        if not PIL_AVAILABLE:
+            messagebox.showinfo("帮助", message, parent=root)
+            return
+        help_win = Toplevel(root)
+        help_win.title("帮助")
+        help_win.transient(root)
+        help_win.resizable(False, False)
+        help_win.configure(background=mac_bg)
+        try:
+            icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "assets" / "icon.png"
+            if icon_path.exists():
+                icon_img = Image.open(icon_path).convert("RGBA").resize((64, 64), Image.LANCZOS)
+                icon_photo = ImageTk.PhotoImage(icon_img)
+                help_win.iconphoto(True, icon_photo)
+                help_win._icon = icon_photo
+        except Exception:
+            pass
+        content = Frame(help_win, bg=mac_bg)
+        content.grid(row=0, column=0, padx=14, pady=12, sticky="nsew")
+        content.columnconfigure(1, weight=1)
+        icon_label = Label(content, bg=mac_bg)
+        if hasattr(help_win, "_icon"):
+            icon_label.configure(image=help_win._icon)
+        icon_label.grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10))
+        text_label = Label(
+            content,
+            text=message,
+            bg=mac_bg,
+            fg=mac_text,
+            font=base_font,
+            justify="left",
+            anchor="w",
+        )
+        text_label.grid(row=0, column=1, sticky="w")
+        close_btn = ttk.Button(content, text="关闭", command=help_win.destroy)
+        close_btn.grid(row=1, column=1, sticky="e", pady=(10, 0))
+        help_win.grab_set()
 
     frm = ttk.Frame(root, padding=12)
     frm.grid(sticky="nsew")
     frm.columnconfigure(0, weight=1)
     frm.columnconfigure(1, weight=0)
-    frm.rowconfigure(5, weight=1)
+    frm.rowconfigure(6, weight=1)
+
+    bg = style.lookup("TFrame", "background") or root.cget("background")
+    root.configure(background=bg)
+
+    top_wrap = Frame(frm, bg=mac_bg)
+    top_wrap.grid(row=0, column=0, columnspan=2, sticky="we", pady=(0, 6))
+    top_wrap.columnconfigure(0, weight=1)
+
+    base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    logo_path = base_dir / "assets" / "logo.png"
+    if PIL_AVAILABLE and logo_path.exists():
+        try:
+            logo_img = Image.open(logo_path).convert("RGBA")
+            logo_height = 36
+            logo_state = {"photo": None, "width": 0}
+            logo_label = Label(top_wrap, bg=mac_bg)
+            logo_label.grid(row=0, column=0, sticky="we")
+
+            def update_logo() -> None:
+                width = max(
+                    frm.winfo_width(),
+                    frm.winfo_reqwidth(),
+                    root.winfo_width(),
+                    root.winfo_reqwidth(),
+                    480,
+                )
+                target_w = max(240, width - 24)
+                if target_w == logo_state["width"]:
+                    return
+                resized = ImageOps.fit(
+                    logo_img,
+                    (target_w, logo_height),
+                    method=Image.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+                photo = ImageTk.PhotoImage(resized)
+                logo_state["photo"] = photo
+                logo_state["width"] = target_w
+                label_icons.append(photo)
+                logo_label.configure(image=photo)
+
+            root.update_idletasks()
+            update_logo()
+        except Exception:
+            pass
+    else:
+        Label(top_wrap, bg=mac_bg).grid(row=0, column=0, sticky="we")
 
     def make_group(parent: object, text: str) -> tuple[Frame, Frame]:
         wrapper = Frame(parent, bg=mac_bg)
         wrapper.columnconfigure(0, weight=1)
-        Label(wrapper, text=text, bg=mac_bg, fg=mac_text, font=title_font).grid(
-            row=0, column=0, sticky="w", padx=2, pady=(0, 4))
-        body = Frame(wrapper, bg=mac_bg, highlightbackground=mac_border, highlightthickness=1)
-        body.grid(row=1, column=0, sticky="we")
+        title_kind = {
+            "JMS 订阅 URL": "link",
+            "生成与保存": "save",
+            "本地订阅服务": "server",
+        }.get(text, "folder")
+        title_label = make_label_with_icon(wrapper, text, title_kind, title_font, size=18, color="#1c1c1e")
+        title_label.grid(row=0, column=0, sticky="w", padx=2, pady=(0, 4))
+        body = Frame(wrapper, bg=mac_bg, highlightthickness=0)
+        body.grid(row=1, column=0, columnspan=2, sticky="we")
         body.columnconfigure(0, weight=1)
         return wrapper, body
 
     url_group_wrap, url_group = make_group(frm, "JMS 订阅 URL")
-    url_group_wrap.grid(row=0, column=0, columnspan=2, sticky="we", pady=(0, 10))
+    url_group_wrap.grid(row=1, column=0, columnspan=2, sticky="we", pady=(0, 10))
     url_group_wrap.columnconfigure(1, weight=0)
 
-    bg = style.lookup("TFrame", "background") or root.cget("background")
-    root.configure(background=bg)
     help_canvas = Canvas(
-        url_group_wrap,
+        top_wrap,
         width=20,
         height=20,
         highlightthickness=0,
-        background=bg,
+        borderwidth=0,
+        background=mac_bg,
         cursor="hand2",
     )
     help_circle = help_canvas.create_oval(
-        2, 2, 18, 18, fill="#f5f5f7", outline="#d1d1d6")
+        2, 2, 18, 18, fill="", outline="#c2c7d0")
     help_text = help_canvas.create_text(
-        10, 10, text="?", fill="#5c5c5c", font=(base_font.actual("family"), 10, "bold"))
-    help_canvas.grid(row=0, column=1, sticky="e", padx=(8, 0))
+        10, 10, text="?", fill="#6b7280", font=(base_font.actual("family"), 10, "bold"))
+    help_canvas.place(relx=1.0, x=-2, y=2, anchor="ne")
 
     def on_help_enter(_e: object = None) -> None:
         help_canvas.itemconfigure(
-            help_circle, fill="#e8f0fe", outline="#8ab4f8")
-        help_canvas.itemconfigure(help_text, fill="#1a73e8")
+        help_circle, fill="#dbeafe", outline="#93c5fd")
+        help_canvas.itemconfigure(help_text, fill="#2563eb")
 
     def on_help_leave(_e: object = None) -> None:
         help_canvas.itemconfigure(
-            help_circle, fill="#f5f5f7", outline="#d1d1d6")
-        help_canvas.itemconfigure(help_text, fill="#5c5c5c")
+        help_circle, fill="", outline="#c2c7d0")
+        help_canvas.itemconfigure(help_text, fill="#6b7280")
 
     help_canvas.bind("<Button-1>", lambda _e: show_help())
     help_canvas.bind("<Enter>", on_help_enter)
@@ -803,19 +1023,16 @@ def run_gui(default_output: str) -> int:
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     output_group_wrap, output_group = make_group(frm, "生成与保存")
-    output_group_wrap.grid(row=1, column=0, columnspan=2, sticky="we", pady=(0, 10))
+    output_group_wrap.grid(row=2, column=0, columnspan=2, sticky="we", pady=(0, 10))
 
-    Label(output_group, text="输出 YAML 路径", bg=mac_bg, fg=mac_text, font=base_font).grid(
-        row=0, column=0, sticky="w")
     path_row = Frame(output_group, bg=mac_bg)
     path_row.grid(row=1, column=0, sticky="we", padx=8, pady=(4, 8))
     path_row.columnconfigure(0, weight=1)
     path_entry = make_entry(path_row, path_var)
     path_entry.grid(row=0, column=0, sticky="we")
-    icon_cache["browse"] = make_icon("download")
-    browse_btn = make_button(path_row, "浏览", choose_path, width=80, icon=icon_cache["browse"])
+    browse_btn = make_button(path_row, "浏览", choose_path, width=88, icon=None)
     browse_btn.grid(
-        row=0, column=1, sticky="w", padx=(6, 0))
+        row=0, column=1, sticky="e", padx=(6, 0))
     path_row.columnconfigure(1, weight=0)
 
     btn_row = Frame(output_group, bg=mac_bg)
@@ -823,51 +1040,56 @@ def run_gui(default_output: str) -> int:
     btn_row.columnconfigure(0, weight=1)
     btn_row_actions = Frame(btn_row, bg=mac_bg)
     btn_row_actions.grid(row=0, column=0, sticky="e")
-    icon_cache["generate"] = make_icon("generate")
-    gen_btn = make_button(btn_row_actions, "生成", generate, width=88, icon=icon_cache["generate"])
+    gen_btn = make_button(btn_row_actions, "生成", generate, width=88, icon=None)
     gen_btn.grid(
         row=0, column=0, padx=(0, 6))
-    icon_cache["save"] = make_icon("save")
-    save_btn = make_button(btn_row_actions, "保存", save_yaml, width=88, icon=icon_cache["save"])
+    save_btn = make_button(btn_row_actions, "保存", save_yaml, width=88, icon=None)
     save_btn.grid(
-        row=0, column=1, padx=(0, 6))
+        row=0, column=1, padx=(0, 0))
     equalize_button_widths([gen_btn, save_btn])
 
     local_group_wrap, local_group = make_group(frm, "本地订阅服务")
-    local_group_wrap.grid(row=2, column=0, columnspan=2, sticky="we", pady=(0, 8))
+    local_group_wrap.grid(row=3, column=0, columnspan=2, sticky="we", pady=(0, 8))
 
     serve_row = Frame(local_group, bg=mac_bg)
     serve_row.grid(row=0, column=0, sticky="we", padx=8, pady=(6, 2))
-    serve_row.columnconfigure(1, weight=1)
-    serve_row.columnconfigure(3, weight=1)
-    serve_row.columnconfigure(5, weight=1)
-    Label(serve_row, text="监听", bg=mac_bg, fg=mac_text, font=base_font).grid(
+    Label(serve_row, text="监听", bg=mac_bg, fg=mac_label, font=base_font).grid(
         row=0, column=0, sticky="w")
+    serve_row.columnconfigure(1, weight=0)
+    serve_row.columnconfigure(3, weight=0)
+    serve_row.columnconfigure(5, weight=0)
     listen_entry = make_entry(serve_row, serve_listen_var)
-    listen_entry.grid(row=0, column=1, sticky="we", padx=(4, 10))
-    Label(serve_row, text="端口", bg=mac_bg, fg=mac_text, font=base_font).grid(
+    listen_entry.configure(width=22)
+    listen_entry.grid(row=0, column=1, sticky="w", padx=(4, 10))
+    Label(serve_row, text="端口", bg=mac_bg, fg=mac_label, font=base_font).grid(
         row=0, column=2, sticky="w")
     port_entry = make_entry(serve_row, serve_port_var)
-    port_entry.grid(row=0, column=3, sticky="we", padx=(4, 10))
-    Label(serve_row, text="间隔(秒)", bg=mac_bg, fg=mac_text, font=base_font).grid(
+    port_entry.configure(width=6)
+    port_entry.grid(row=0, column=3, sticky="w", padx=(4, 10))
+    Label(serve_row, text="间隔(秒)", bg=mac_bg, fg=mac_label, font=base_font).grid(
         row=0, column=4, sticky="w")
     interval_entry = make_entry(serve_row, serve_interval_var)
-    interval_entry.grid(row=0, column=5, sticky="we", padx=(4, 0))
-
-    toggle_row = Frame(local_group, bg=mac_bg)
-    toggle_row.grid(row=1, column=0, sticky="we", padx=8, pady=(4, 0))
-    toggle_row.columnconfigure(0, weight=1)
-    toggle_row.columnconfigure(1, weight=0)
-    Label(toggle_row, text="启用本地服务", bg=mac_bg, fg=mac_text, font=base_font).grid(
-        row=0, column=0, sticky="w")
-    toggle_btn = MacToggle(toggle_row, serve_enabled_var, toggle_local_server)
-    toggle_btn.grid(row=0, column=1, sticky="e")
+    interval_entry.configure(width=6)
+    interval_entry.grid(row=0, column=5, sticky="w", padx=(4, 0))
+    serve_row.columnconfigure(6, weight=0)
+    serve_row.columnconfigure(7, weight=1)
+    toggle_btn = MacToggle(serve_row, serve_enabled_var, toggle_local_server)
+    toggle_btn.grid(row=0, column=7, sticky="e", padx=(12, 0))
 
     serve_status_row = Frame(local_group, bg=mac_bg)
-    serve_status_row.grid(row=2, column=0, sticky="we", padx=8, pady=(4, 8))
+    serve_status_row.grid(row=1, column=0, sticky="we", padx=8, pady=(4, 8))
     serve_status_row.columnconfigure(0, weight=1)
-    serve_status_entry = make_entry(serve_status_row, serve_status_var, readonly=True)
+    serve_status_entry = Label(
+        serve_status_row,
+        textvariable=serve_status_var,
+        bg=mac_bg,
+        fg=mac_label,
+        font=base_font,
+        anchor="w",
+        cursor="arrow",
+    )
     serve_status_entry.grid(row=0, column=0, sticky="we")
+    serve_status_entry.bind("<Double-Button-1>", lambda _e: copy_local_url())
 
     def copy_local_url() -> None:
         text = serve_status_var.get().strip()
@@ -877,14 +1099,16 @@ def run_gui(default_output: str) -> int:
         root.clipboard_clear()
         root.clipboard_append(text)
         set_status("已复制本地订阅地址。", "success")
+        try:
+            serve_status_entry.configure(fg="#0a84ff")
+            root.after(300, lambda: serve_status_entry.configure(fg=mac_label))
+        except Exception:
+            pass
 
-    icon_cache["copy"] = make_icon("copy")
-    copy_btn = make_button(serve_status_row, "复制", copy_local_url, width=80, icon=icon_cache["copy"])
-    copy_btn.grid(row=0, column=1, padx=(6, 0))
     serve_status_row.columnconfigure(1, weight=0)
 
     bottom_row = Frame(frm, bg=mac_bg)
-    bottom_row.grid(row=5, column=0, columnspan=2, sticky="we", pady=(4, 0))
+    bottom_row.grid(row=6, column=0, columnspan=2, sticky="we", pady=(4, 0))
     bottom_row.columnconfigure(0, weight=1)
     status_label = Label(
         bottom_row,
@@ -896,12 +1120,38 @@ def run_gui(default_output: str) -> int:
     )
     status_label.grid(row=0, column=0, sticky="w", padx=8, pady=2)
 
-    notebook = ttk.Notebook(frm)
-    notebook.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
-    yaml_tab = ttk.Frame(notebook)
-    log_tab = ttk.Frame(notebook)
-    notebook.add(yaml_tab, text="YAML 输出")
-    notebook.add(log_tab, text="日志")
+    tab_wrap = Frame(frm, bg=mac_bg)
+    tab_wrap.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
+    tab_wrap.columnconfigure(0, weight=1)
+    tab_wrap.rowconfigure(1, weight=1)
+
+    tab_bar = Frame(tab_wrap, bg=mac_bg)
+    tab_bar.grid(row=0, column=0, sticky="w", padx=4, pady=(0, 4))
+
+    def make_tab_item(title: str) -> tuple[Frame, Label, Frame]:
+        item = Frame(tab_bar, bg=mac_bg)
+        item.columnconfigure(0, weight=1)
+        label = Label(item, text=title, bg=mac_bg, fg=mac_label, font=small_font)
+        label.grid(row=0, column=0, sticky="w")
+        underline = Frame(item, bg=mac_bg, height=2)
+        underline.grid(row=1, column=0, sticky="we", pady=(2, 0))
+        return item, label, underline
+
+    tab_yaml, tab_yaml_label, tab_yaml_line = make_tab_item("YAML 输出")
+    tab_log, tab_log_label, tab_log_line = make_tab_item("日志")
+    tab_yaml.grid(row=0, column=0, sticky="w", padx=(0, 12))
+    tab_log.grid(row=0, column=1, sticky="w")
+
+    tab_body = Frame(tab_wrap, bg=mac_bg)
+    tab_body.grid(row=1, column=0, sticky="nsew")
+    tab_body.rowconfigure(0, weight=1)
+    tab_body.columnconfigure(0, weight=1)
+
+    yaml_tab = Frame(tab_body, bg=mac_bg)
+    log_tab = Frame(tab_body, bg=mac_bg)
+    yaml_tab.grid(row=0, column=0, sticky="nsew")
+    log_tab.grid(row=0, column=0, sticky="nsew")
+    log_tab.grid_remove()
 
     yaml_tab.rowconfigure(0, weight=1)
     yaml_tab.columnconfigure(0, weight=1)
@@ -917,6 +1167,8 @@ def run_gui(default_output: str) -> int:
         bg=mac_field_bg,
         fg=mac_text,
         insertbackground=mac_text,
+        highlightthickness=0,
+        bd=0,
     )
     output_text.grid(row=0, column=0, sticky="nsew")
 
@@ -929,18 +1181,37 @@ def run_gui(default_output: str) -> int:
         bg=mac_field_bg,
         fg=mac_text,
         insertbackground=mac_text,
+        highlightthickness=0,
+        bd=0,
     )
     log_text.grid(row=0, column=0, sticky="nsew")
     log_text.configure(state="disabled")
 
-    def on_tab_changed(_e: object = None) -> None:
-        current = notebook.select()
-        if current == str(yaml_tab):
+    def select_tab(tab: str) -> None:
+        if tab == "yaml":
+            yaml_tab.grid()
+            log_tab.grid_remove()
+            tab_yaml_label.configure(fg=mac_text)
+            tab_log_label.configure(fg=mac_label)
+            tab_yaml_line.configure(bg=mac_text)
+            tab_log_line.configure(bg=mac_bg)
             set_output(latest_yaml.get("text", ""))
         else:
+            log_tab.grid()
+            yaml_tab.grid_remove()
+            tab_yaml_label.configure(fg=mac_label)
+            tab_log_label.configure(fg=mac_text)
+            tab_yaml_line.configure(bg=mac_bg)
+            tab_log_line.configure(bg=mac_text)
             render_log()
 
-    notebook.bind("<<NotebookTabChanged>>", on_tab_changed)
+    def bind_tab(item: Frame, label: Label, tab: str) -> None:
+        item.bind("<Button-1>", lambda _e: select_tab(tab))
+        label.bind("<Button-1>", lambda _e: select_tab(tab))
+
+    bind_tab(tab_yaml, tab_yaml_label, "yaml")
+    bind_tab(tab_log, tab_log_label, "log")
+    select_tab("yaml")
 
     copyright_label = Label(
         bottom_row,
@@ -954,7 +1225,10 @@ def run_gui(default_output: str) -> int:
 
     url_entry.focus_set()
     root.update_idletasks()
-    root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
+    req_w = root.winfo_reqwidth()
+    req_h = root.winfo_reqheight()
+    root.geometry(f"{req_w}x{req_h}")
+    root.minsize(req_w, req_h)
     root.after(200, process_tray_events)
     root.mainloop()
     return 0
