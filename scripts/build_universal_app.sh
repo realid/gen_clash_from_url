@@ -290,6 +290,8 @@ arch -arm64 "$PYTHON3_ARM" -m PyInstaller \
   --windowed \
   --name "$EXE_NAME" \
   --icon "$ICON_PATH" \
+  --add-data "assets/logo.png:assets" \
+  --add-data "assets/icon.png:assets" \
   --add-data "assets/tray:assets/tray" \
   --hidden-import pystray \
   --hidden-import pystray._darwin \
@@ -308,6 +310,8 @@ arch -x86_64 "$PYTHON3_X86" -m PyInstaller \
   --windowed \
   --name "$EXE_NAME" \
   --icon "$ICON_PATH" \
+  --add-data "assets/logo.png:assets" \
+  --add-data "assets/icon.png:assets" \
   --add-data "assets/tray:assets/tray" \
   --hidden-import pystray \
   --hidden-import pystray._darwin \

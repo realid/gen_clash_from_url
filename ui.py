@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import atexit
+import os
 import queue
 import sys
 import threading
@@ -26,6 +28,12 @@ from tkinter import (
 from tkinter import filedialog, font as tkfont
 
 from core import InternalError, generate_from_url
+
+try:
+    import fcntl
+    FCNTL_AVAILABLE = True
+except Exception:
+    FCNTL_AVAILABLE = False
 
 try:
     import ttkbootstrap as tb
@@ -55,20 +63,83 @@ except Exception:
 
 
 def run_gui(default_output: str) -> int:
+    def acquire_single_instance_lock() -> Optional[object]:
+        if not FCNTL_AVAILABLE:
+            return None
+        lock_path = Path.home() / ".config" / "gen_clash_from_url" / "app.lock"
+        handle = None
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(lock_path, "a+")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            handle.seek(0)
+            handle.truncate()
+            handle.write(str(os.getpid()))
+            handle.flush()
+            return handle
+        except OSError:
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+            return None
+
+    lock_handle = acquire_single_instance_lock()
+    if FCNTL_AVAILABLE and lock_handle is None:
+        try:
+            temp_root = Tk()
+            temp_root.withdraw()
+            messagebox.showinfo("JMS 订阅管家", "程序已在运行。")
+            temp_root.destroy()
+        except Exception:
+            pass
+        return 0
+
     if TTKBOOTSTRAP:
         root = tb.Window(themename="yeti")
     else:
         root = Tk()
+    if lock_handle is not None:
+        atexit.register(lock_handle.close)
+    def apply_dpi_compensation() -> None:
+        if not getattr(sys, "frozen", False):
+            return
+        if sys.platform != "darwin":
+            return
+        try:
+            dpi = root.winfo_fpixels("1i")
+            scale = 96.0 / dpi if dpi else 1.0
+            root.tk.call("tk::mac::useCompatibilityMetrics", 1)
+            root.tk.call("tk", "scaling", scale)
+        except Exception:
+            pass
+
+    apply_dpi_compensation()
     root.title(" ")
     root.resizable(False, False)
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
 
-    base_font = tkfont.Font(family="SF Pro Text", size=10)
+    def clear_focus_on_click(event: object) -> None:
+        widget = getattr(event, "widget", None)
+        if widget is None:
+            return
+        try:
+            widget_class = widget.winfo_class()
+        except Exception:
+            return
+        if widget_class in ("Entry", "Text", "TEntry", "TCombobox", "Spinbox"):
+            return
+        root.focus_set()
+
+    root.bind("<Button-1>", clear_focus_on_click, add="+")
+
+    base_font = tkfont.Font(family="SF Pro Text", size=9)
     if base_font.actual("family") != "SF Pro Text":
-        base_font = tkfont.Font(family="PingFang SC", size=12)
-    small_font = tkfont.Font(family=base_font.actual("family"), size=11)
-    title_font = tkfont.Font(family=base_font.actual("family"), size=12, weight="bold")
+        base_font = tkfont.Font(family="PingFang SC", size=11)
+    small_font = tkfont.Font(family=base_font.actual("family"), size=10)
+    title_font = tkfont.Font(family=base_font.actual("family"), size=11, weight="bold")
     logo_font = tkfont.Font(family=base_font.actual("family"), size=13, weight="bold")
 
     style = ttk.Style()
@@ -77,6 +148,7 @@ def run_gui(default_output: str) -> int:
             style.theme_use("clam")
         except Exception:
             pass
+    apply_dpi_compensation()
     mac_bg = "#f2f2f7"
     mac_border = "#c7c7cc"
     mac_text = "#1c1c1e"
@@ -232,6 +304,8 @@ def run_gui(default_output: str) -> int:
         return Label(parent, text=text, bg=mac_bg, fg=mac_text, font=font)
 
     def _rounded_rect(canvas: Canvas, x1: int, y1: int, x2: int, y2: int, r: int, **kwargs: object) -> int:
+        if r <= 0:
+            return canvas.create_rectangle(x1, y1, x2, y2, **kwargs)
         points = [
             x1 + r, y1,
             x2 - r, y1,
@@ -250,15 +324,24 @@ def run_gui(default_output: str) -> int:
 
 
     class RoundedEntry(Frame):
-        def __init__(self, parent: object, textvariable: StringVar, readonly: bool = False):
+        def __init__(
+            self,
+            parent: object,
+            textvariable: StringVar,
+            readonly: bool = False,
+            radius: int = 7,
+            pad: int = 2,
+            show_border: bool = True,
+        ):
             super().__init__(parent, bg=mac_bg)
             Frame.configure(self, height=28)
             self.configure(height=28)
             self.grid_propagate(False)
             self.pack_propagate(False)
             self._focused = False
-            self._pad = 2
-            self._radius = 7
+            self._pad = pad
+            self._radius = radius
+            self._show_border = show_border
             self._canvas = Canvas(self, highlightthickness=0, bg=mac_bg)
             self._canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.entry = Entry(
@@ -295,7 +378,12 @@ def run_gui(default_output: str) -> int:
             if w <= 1 or h <= 1:
                 return
             self._canvas.delete("all")
-            outline = "#0a84ff" if self._focused else mac_border
+            if self._show_border:
+                outline = "#0a84ff" if self._focused else mac_border
+                width = 1
+            else:
+                outline = mac_field_bg
+                width = 0
             _rounded_rect(
                 self._canvas,
                 1,
@@ -305,7 +393,7 @@ def run_gui(default_output: str) -> int:
                 self._radius,
                 fill=mac_field_bg,
                 outline=outline,
-                width=1,
+                width=width,
             )
 
         def bind(self, sequence: Optional[str] = None, func: Optional[object] = None, add: Optional[bool] = None):
@@ -322,6 +410,12 @@ def run_gui(default_output: str) -> int:
 
         def delete(self, first: int, last: Optional[int] = None) -> None:
             self.entry.delete(first, last)
+
+        def xview(self, *args: object) -> object:
+            return self.entry.xview(*args)
+
+        def xview_scroll(self, number: int, what: str) -> None:
+            self.entry.xview_scroll(number, what)
 
         def configure(self, **kwargs: object) -> None:
             if "height" in kwargs:
@@ -437,20 +531,14 @@ def run_gui(default_output: str) -> int:
     def equalize_button_widths(buttons: List[MacButton]) -> None:
         return
     def make_entry(parent: object, textvariable: StringVar, readonly: bool = False) -> Entry:
-        entry = Entry(
+        entry = RoundedEntry(
             parent,
             textvariable=textvariable,
-            bd=1,
-            relief="solid",
-            highlightthickness=0,
-            fg=mac_text,
-            bg=mac_field_bg,
-            insertbackground=mac_text,
-            disabledforeground=mac_text,
-            font=base_font,
+            readonly=readonly,
+            radius=0,
+            pad=0,
+            show_border=False,
         )
-        if readonly:
-            entry.configure(state="readonly", readonlybackground=mac_field_bg)
         return entry
 
     def load_last_url() -> str:
@@ -775,7 +863,7 @@ def run_gui(default_output: str) -> int:
         close_btn.grid(row=1, column=1, sticky="e", pady=(10, 0))
         help_win.grab_set()
 
-    frm = ttk.Frame(root, padding=12)
+    frm = ttk.Frame(root, padding=10)
     frm.grid(sticky="nsew")
     frm.columnconfigure(0, weight=1)
     frm.columnconfigure(1, weight=0)
@@ -793,7 +881,7 @@ def run_gui(default_output: str) -> int:
     if PIL_AVAILABLE and logo_path.exists():
         try:
             logo_img = Image.open(logo_path).convert("RGBA")
-            logo_height = 36
+            logo_height = 30
             logo_state = {"photo": None, "width": 0}
             logo_label = Label(top_wrap, bg=mac_bg)
             logo_label.grid(row=0, column=0, sticky="we")
@@ -879,11 +967,43 @@ def run_gui(default_output: str) -> int:
     url_entry = make_entry(url_group, url_var)
     url_entry.grid(row=0, column=0, sticky="we", padx=8, pady=8)
 
-    def persist_url(_e: object = None) -> None:
+    persist_state: Dict[str, Optional[str]] = {"job": None}
+
+    def persist_url_now(_e: object = None) -> None:
+        if persist_state["job"]:
+            try:
+                root.after_cancel(persist_state["job"])
+            except Exception:
+                pass
+            persist_state["job"] = None
         save_last_url(url_var.get())
 
-    url_entry.bind("<FocusOut>", persist_url)
-    url_entry.bind("<KeyRelease>", persist_url)
+    def schedule_persist_url(_e: object = None) -> None:
+        if persist_state["job"]:
+            try:
+                root.after_cancel(persist_state["job"])
+            except Exception:
+                pass
+        persist_state["job"] = root.after(300, persist_url_now)
+
+    def bind_drag_autoscroll(entry: Entry) -> None:
+        def autoscroll_on_drag(e: object) -> None:
+            try:
+                x = e.x
+                w = entry.winfo_width()
+                margin = 12
+                if x < margin:
+                    entry.xview_scroll(-1, "units")
+                elif x > w - margin:
+                    entry.xview_scroll(1, "units")
+            except Exception:
+                pass
+
+        entry.bind("<B1-Motion>", autoscroll_on_drag, add="+")
+
+    url_entry.bind("<FocusOut>", persist_url_now)
+    url_entry.bind("<KeyRelease>", schedule_persist_url)
+    bind_drag_autoscroll(url_entry)
 
     def start_local_server() -> None:
         if serve_state["httpd"] is not None:
@@ -1012,7 +1132,7 @@ def run_gui(default_output: str) -> int:
             stop_local_server()
 
     def on_close() -> None:
-        persist_url()
+        persist_url_now()
         if ensure_tray():
             root.withdraw()
             set_dock_visibility(False)
@@ -1030,6 +1150,7 @@ def run_gui(default_output: str) -> int:
     path_row.columnconfigure(0, weight=1)
     path_entry = make_entry(path_row, path_var)
     path_entry.grid(row=0, column=0, sticky="we")
+    bind_drag_autoscroll(path_entry)
     browse_btn = make_button(path_row, "浏览", choose_path, width=88, icon=None)
     browse_btn.grid(
         row=0, column=1, sticky="e", padx=(6, 0))
@@ -1061,16 +1182,19 @@ def run_gui(default_output: str) -> int:
     listen_entry = make_entry(serve_row, serve_listen_var)
     listen_entry.configure(width=22)
     listen_entry.grid(row=0, column=1, sticky="w", padx=(4, 10))
+    bind_drag_autoscroll(listen_entry)
     Label(serve_row, text="端口", bg=mac_bg, fg=mac_label, font=base_font).grid(
         row=0, column=2, sticky="w")
     port_entry = make_entry(serve_row, serve_port_var)
     port_entry.configure(width=6)
     port_entry.grid(row=0, column=3, sticky="w", padx=(4, 10))
+    bind_drag_autoscroll(port_entry)
     Label(serve_row, text="间隔(秒)", bg=mac_bg, fg=mac_label, font=base_font).grid(
         row=0, column=4, sticky="w")
     interval_entry = make_entry(serve_row, serve_interval_var)
     interval_entry.configure(width=6)
     interval_entry.grid(row=0, column=5, sticky="w", padx=(4, 0))
+    bind_drag_autoscroll(interval_entry)
     serve_row.columnconfigure(6, weight=0)
     serve_row.columnconfigure(7, weight=1)
     toggle_btn = MacToggle(serve_row, serve_enabled_var, toggle_local_server)
@@ -1161,7 +1285,7 @@ def run_gui(default_output: str) -> int:
     output_text = Text(
         yaml_tab,
         width=70,
-        height=18,
+        height=16,
         wrap="none",
         font=base_font,
         bg=mac_field_bg,
@@ -1175,7 +1299,7 @@ def run_gui(default_output: str) -> int:
     log_text = Text(
         log_tab,
         width=70,
-        height=18,
+        height=16,
         wrap="word",
         font=base_font,
         bg=mac_field_bg,
@@ -1224,11 +1348,17 @@ def run_gui(default_output: str) -> int:
     copyright_label.grid(row=0, column=1, sticky="e", padx=8, pady=2)
 
     url_entry.focus_set()
-    root.update_idletasks()
-    req_w = root.winfo_reqwidth()
-    req_h = root.winfo_reqheight()
-    root.geometry(f"{req_w}x{req_h}")
-    root.minsize(req_w, req_h)
+    def set_window_size(lock: bool = False) -> None:
+        root.update_idletasks()
+        req_w = root.winfo_reqwidth()
+        req_h = root.winfo_reqheight()
+        root.geometry(f"{req_w}x{req_h}")
+        if lock:
+            root.minsize(req_w, req_h)
+            root.maxsize(req_w, req_h)
+
+    set_window_size()
+    root.after(200, lambda: set_window_size(lock=True))
     root.after(200, process_tray_events)
     root.mainloop()
     return 0
